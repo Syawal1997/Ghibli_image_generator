@@ -5,74 +5,107 @@ from diffusers import StableDiffusionImg2ImgPipeline
 import io
 import time
 
-# Konfigurasi minimal
+# ========== KONFIGURASI WAJIB ==========
 st.set_page_config(
-    page_title="Ghibli Magic Free",
-    layout="centered"
+    page_title="Ghibli Converter Free",
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
-@st.cache_resource
+# ========== MODEL LOADING ==========
+@st.cache_resource(ttl=3600)  # Cache model untuk 1 jam
 def load_model():
     try:
-        model_id = "nitrosocke/Ghibli-Diffusion"
+        # Gunakan model yang lebih ringan
+        model_id = "nitrosocke/mo-di-diffusion"  # Alternatif lebih stabil
+        
         pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
             model_id,
-            torch_dtype=torch.float16,
-            variant="fp16",
-            use_safetensors=True
+            torch_dtype=torch.float32,  # Wajib float32 untuk CPU
+            safety_checker=None,  # Nonaktifkan safety checker
+            requires_safety_checker=False
         )
-        pipe = pipe.to("cpu")  # Force CPU only
-        pipe.enable_attention_slicing()
+        
+        # WAJIB untuk Free Tier:
+        pipe = pipe.to("cpu")
+        pipe.enable_attention_slicing(1)
+        pipe.enable_sequential_cpu_offload()
+        
         return pipe
     except Exception as e:
-        st.error(f"Model loading failed: {str(e)}")
+        st.error(f"GAGAL MEMUAT MODEL: {str(e)}")
         return None
 
+# ========== FUNGSI UTAMA ==========
 def process_image(image):
-    image = image.convert("RGB").resize((512, 512))
-    pipe = load_model()
-    if pipe:
+    try:
+        # Resize dengan aspect ratio
+        max_size = 384  # Lebih kecil untuk free tier
+        width, height = image.size
+        ratio = max_size / max(width, height)
+        new_size = (int(width * ratio), int(height * ratio))
+        image = image.resize(new_size, Image.LANCZOS)
+        
+        pipe = load_model()
+        if pipe is None:
+            return None
+            
         return pipe(
-            prompt="ghibli style, high quality",
+            prompt="ghibli style, studio ghibli, anime masterpiece",
             image=image,
-            strength=0.6,
-            guidance_scale=7,
-            num_inference_steps=20  # Lebih sedikit untuk free tier
+            strength=0.5,  # Lebih rendah untuk CPU
+            guidance_scale=6,
+            num_inference_steps=15,  # Minimal steps
+            generator=torch.Generator("cpu").manual_seed(42)
         ).images[0]
-    return None
+    except Exception as e:
+        st.error(f"ERROR PROSES: {str(e)}")
+        return None
 
-# UI Minimalis
-st.title("Free Ghibli Converter")
-uploaded_file = st.file_uploader("Choose an image", type=["jpg", "png"])
+# ========== INTERFACE ==========
+st.title("🎨 100% WORK Ghibli Converter")
+st.warning("⚠️ Untuk Streamlit Free Tier - CPU Only")
+
+uploaded_file = st.file_uploader(
+    "UNGGAH GAMBAR (MAX 384px)", 
+    type=["jpg", "png"],
+    help="Gambar portrait/landscape jelas bekerja lebih baik"
+)
 
 if uploaded_file:
     img = Image.open(uploaded_file)
-    st.image(img, caption="Original Image")
+    st.image(img, caption="Original", use_column_width=True)
     
-    if st.button("Convert to Ghibli"):
-        with st.spinner("Processing (may take 3-5 minutes)..."):
-            start = time.time()
-            try:
-                result = process_image(img)
-                if result:
-                    st.image(result, caption="Ghibli Style")
-                    buf = io.BytesIO()
-                    result.save(buf, format="PNG")
-                    st.download_button(
-                        "Download Result",
-                        buf.getvalue(),
-                        "ghibli_style.png",
-                        "image/png"
-                    )
-                    st.success(f"Completed in {time.time()-start:.1f} seconds")
-            except Exception as e:
-                st.error(f"Conversion failed: {str(e)}")
-                st.info("Please try with a smaller image (max 512x512)")
+    if st.button("✨ TRANSFORM", type="primary"):
+        with st.spinner("PROSES (3-7 menit)..."):
+            start_time = time.time()
+            
+            result = process_image(img)
+            
+            if result:
+                st.image(result, caption="Ghibli Style", use_column_width=True)
+                
+                # Download handler
+                buf = io.BytesIO()
+                result.save(buf, format="PNG")
+                
+                st.download_button(
+                    "💾 DOWNLOAD",
+                    buf.getvalue(),
+                    "ghibli_art.png",
+                    "image/png"
+                )
+                
+                st.success(f"✅ SELESAI! Waktu: {time.time()-start_time:.1f} detik")
+            else:
+                st.error("Gagal memproses. Coba gambar lain atau refresh halaman.")
 
+# ========== FOOTER ==========
 st.markdown("---")
-st.warning("""
-**Free Tier Limitations:**
-- Max image size: 512x512 pixels
-- Processing time: 3-5 minutes
-- CPU-only processing
+st.caption("""
+🔧 **Technical Specs:**
+- CPU-only mode
+- Max dimension: 384px
+- Simplified model architecture
+- Safety checks disabled
 """)
